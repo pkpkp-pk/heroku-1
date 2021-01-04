@@ -37,7 +37,7 @@
       "value": ""
     },
     "refresh_token": {
-      "description": "A refresh token from Google.",
+      "description": "A refresh token from Google. Get it from here: https://libdrive-oauth2.netlify.app/",
       "value": ""
     },
     "secret_key": {
