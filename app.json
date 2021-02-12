@@ -17,8 +17,20 @@
   "success_url": "/#/",
   "env": {
     "LIBDRIVE_CONFIG": {
-      "description": "Create this through the config generator: https://libdrive-oauth2.netlify.app/",
-      "value": "[CONFIG]\naccess_token=\naccount_list=\ncategory_list=\nclient_id=\nclient_secret=\nrefresh_token=\nsecret_key=\ntmdb_api_key=\ntoken_expiry="
+      "description": "Create this through the config generator: https://libdrive-config.netlify.app/",
+      "value":
+		{
+		  "access_token": "",
+		  "account_list": [],
+		  "category_list": [],
+		  "client_id": "",
+		  "client_secret": "",
+		  "cloudflare": "",
+		  "refresh_token": "",
+		  "secret_key": "",
+		  "tmdb_api_key": "",
+		  "token_expiry": ""
+	    }
     }
   },
   "image": "heroku/python",
