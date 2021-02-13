@@ -3,6 +3,7 @@ import json
 import os
 import random
 import sys
+import threading
 
 import flask
 import flask_cors
@@ -41,7 +42,7 @@ print("================ GETTING CREDENTIALS... ================")
 
 metadata = src.metadata.readMetadata(config["category_list"])
 metadata = src.metadata.writeMetadata(
-    config["category_list"], drive, config["tmdb_api_key"], backdrop_base_url, poster_base_url)
+    config["category_list"], drive, config["tmdb_api_key"])
 
 print("================ BUILDING METADATA... ================")
 
@@ -74,7 +75,7 @@ def authAPI():
             (i for i in config["account_list"] if i["auth"] == a), None)
         return flask.jsonify(account)
     else:
-        return flask.Response("The username and/or password provided was incorrect.", status=401)
+        return flask.jsonify({"error": {"code": 401, "message": "The username and/or password provided was incorrect."}}), 401
 
 
 @app.route("/api/v1/environment")
@@ -106,7 +107,7 @@ def metadataAPI():
             if tmp_metadata:
                 pass
             else:
-                return flask.Response("The category provided could not be found.", status=400)
+                return flask.jsonify({"error": {"code": 400, "message": "The category provided could not be found."}}), 400
         if q:
             index = 0
             for category in tmp_metadata:
@@ -175,12 +176,12 @@ def metadataAPI():
 
         return flask.jsonify(tmp_metadata)
     else:
-        return flask.Response("The auth code provided was incorrect.", status=401)
+        return flask.jsonify({"error": {"code": 401, "message": "The auth code provided was incorrect."}}), 401
 
 
 @app.route("/api/v1/redirectdownload/<name>")
 def downloadRedirectAPI(name):
-    tmp_metadata = metadata
+    tmp_metadata = src.metadata.readMetadata(config["category_list"])
     id = flask.request.args.get("id")
     ids = src.metadata.jsonExtract(obj=tmp_metadata, key="id", getObj=True)
     name = ""
@@ -238,7 +239,7 @@ def downloadAPI(name):
         ) if name.lower() not in excluded_headers]
         return flask.Response(flask.stream_with_context(download_file(resp)), resp.status_code, headers)
     else:
-        return flask.Response("The auth code or id provided was incorrect.", status=401)
+        return flask.jsonify({"error": {"code": 401, "message": "The auth code or ID provided was incorrect."}}), 401
 
 
 @app.route("/api/v1/config", methods=["GET", "POST"])
@@ -249,7 +250,7 @@ def configAPI():
         if secret == config["secret_key"]:
             return flask.jsonify(config)
         else:
-            return flask.Response("The secret key provided was incorrect", status=401)
+            return flask.jsonify({"error": {"code": 401, "message": "The secret key provided was incorrect."}}), 401
     elif flask.request.method == "POST":
         secret = flask.request.args.get("secret")
         if secret == None:
@@ -258,9 +259,36 @@ def configAPI():
             data = flask.request.json
             data["token_expiry"] = str(datetime.datetime.utcnow())
             src.config.updateConfig(data)
-            return json.dumps({"success": True}), 200, {"ContentType": "application/json"}
+            return flask.jsonify({"success": True}), 200
         else:
-            return flask.Response("The secret key provided was incorrect", status=401)
+            return flask.jsonify({"error": {"code": 401, "message": "The secret key provided was incorrect."}}), 401
+
+
+@app.route("/api/v1/rebuild")
+def rebuildAPI():
+    config = src.config.readConfig()
+    force = flask.request.args.get("force")
+    if force == "true":
+        a = flask.request.args.get("a")
+        if any(a == account["auth"] for account in config["account_list"]):
+            thread = threading.Thread(target=src.metadata.writeMetadata, args=(
+                config["category_list"], drive, config["tmdb_api_key"]))
+            thread.daemon = True
+            thread.start()
+            return flask.jsonify({"success": {"code": 200, "message": "libDrive is building your new metadata"}}), 200
+        else:
+            return flask.jsonify({"error": {"code": 401, "message": "The secret key provided was incorrect."}}), 401
+    else:
+        metadata = src.metadata.readMetadata(config["category_list"])
+        build_time = datetime.datetime.strptime(metadata[-1]["buildTime"], "%Y-%m-%d %H:%M:%S.%f")
+        if datetime.datetime.utcnow() >= build_time + datetime.timedelta(minutes=config["build_interval"]):
+            thread = threading.Thread(target=src.metadata.writeMetadata, args=(
+                config["category_list"], drive, config["tmdb_api_key"]))
+            thread.daemon = True
+            thread.start()
+            return flask.jsonify({"success": {"code": 200, "message": "libDrive is building your new metadata"}}), 200
+        else:
+            return flask.jsonify({"error": {"code": 425, "message": "The build interval restriction ends at %s UTC. Last build date was at %s UTC." % (build_time + datetime.timedelta(minutes=config["build_interval"]), build_time)}}), 425
 
 
 @app.route("/api/v1/restart")
@@ -270,7 +298,7 @@ def restartAPI():
     if secret == config["secret_key"]:
         os.execv(sys.executable, [sys.executable] + sys.argv)
     else:
-        return flask.Response("The secret key provided was incorrect", status=401)
+        return flask.jsonify({"error": {"code": 401, "message": "The secret key provided was incorrect."}}), 401
 
 
 @app.route("/api/v1/ping")
