@@ -23,9 +23,9 @@
     "WEB_CONCURRENCY": {
       "description": "Don't change this, leave the value as 1",
       "value": 1
-    },
-    "image": "heroku/python"
+    }
   },
+  "image": "heroku/python",
   "buildpacks": [
     {
       "url": "heroku/python"
