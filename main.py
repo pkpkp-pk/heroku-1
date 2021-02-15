@@ -14,6 +14,7 @@ import requests
 import src.config
 import src.credentials
 import src.metadata
+import src.tree
 
 print("================      STARTING      ================")
 if os.getenv("LIBDRIVE_CONFIG"):
@@ -59,7 +60,9 @@ else:
 
 def create_app():
     app = flask.Flask(__name__, static_folder="build")
-    if len(metadata) > 0:
+    config_categories = [d["id"] for d in config["category_list"]]
+    metadata_categories = [d["id"] for d in metadata]
+    if len(metadata) > 0 and sorted(config_categories) == sorted(metadata_categories):
         if datetime.datetime.utcnow() <= datetime.datetime.strptime(metadata[-1]["buildTime"], "%Y-%m-%d %H:%M:%S.%f") + datetime.timedelta(minutes=config["build_interval"]):
             return app
     print("================  WRITING METADATA  ================")
@@ -195,6 +198,27 @@ def metadataAPI():
             for item in ids:
                 if item["id"] == id:
                     tmp_metadata = item
+                    tmp_metadata["children"] = []
+                    if tmp_metadata.get("title") and tmp_metadata["type"] == "directory":
+                        for item in src.tree.iterDrive(tmp_metadata, drive):
+                            if item["mimeType"] == "application/vnd.google-apps.folder":
+                                item["type"] = "directory"
+                                tmp_metadata["children"].append(item)
+                            else:
+                                item["type"] = "file"
+                                tmp_metadata["children"].append(item)
+                    return flask.jsonify(tmp_metadata)
+            tmp_metadata = drive.files().get(fileId=id, supportsAllDrives=True).execute()
+            if tmp_metadata["mimeType"] == "application/vnd.google-apps.folder":
+                tmp_metadata["type"] = "directory"
+                tmp_metadata["children"] = []
+                for item in src.tree.iterDrive(tmp_metadata, drive):
+                    if tmp_metadata["mimeType"] == "application/vnd.google-apps.folder":
+                        tmp_metadata["type"] = "directory"
+                        tmp_metadata["children"].append(item)
+                    else:
+                        tmp_metadata["type"] = "file"
+                        tmp_metadata["children"].append(item)
 
         return flask.jsonify(tmp_metadata)
     else:
