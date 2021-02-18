@@ -7,8 +7,7 @@ import time
 import googleapiclient
 import requests
 
-import src.tree
-import src.walk
+import src.drivetools
 
 
 def parseMovie(name):
@@ -71,13 +70,13 @@ def mediaIdentifier(
         try:
             posterPath = poster_base_url + search_content["results"][0]["poster_path"]
         except:
-            posterPath = ""
+            posterPath = None
         try:
             backdropPath = (
                 backdrop_base_url + search_content["results"][0]["backdrop_path"]
             )
         except:
-            backdropPath = ""
+            backdropPath = None
         try:
             releaseDate = search_content["results"][0]["release_date"]
         except:
@@ -85,7 +84,7 @@ def mediaIdentifier(
         try:
             overview = search_content["results"][0]["overview"]
         except:
-            overview = ""
+            overview = None
         try:
             popularity = search_content["results"][0]["popularity"]
         except:
@@ -116,13 +115,13 @@ def mediaIdentifier(
         try:
             posterPath = poster_base_url + search_content["results"][0]["poster_path"]
         except:
-            posterPath = ""
+            posterPath = None
         try:
             backdropPath = (
                 backdrop_base_url + search_content["results"][0]["backdrop_path"]
             )
         except:
-            backdropPath = ""
+            backdropPath = None
         try:
             releaseDate = search_content["results"][0]["first_air_date"]
         except:
@@ -130,7 +129,7 @@ def mediaIdentifier(
         try:
             overview = search_content["results"][0]["overview"]
         except:
-            overview = ""
+            overview = None
         try:
             popularity = search_content["results"][0]["popularity"]
         except:
@@ -226,12 +225,7 @@ def writeMetadata(config, drive):
             tree = root
             tree["type"] = "directory"
             tree["children"] = []
-            tmp_metadata = src.walk.driveWalk(root, tree, [], drive)
-            tmp_metadata["children"] = [
-                x
-                for x in tmp_metadata["children"]
-                if x["mimeType"] != "application/vnd.google-apps.folder"
-            ]
+            tmp_metadata = src.drivetools.driveWalk(root, drive, root)
             tmp_metadata["categoryInfo"] = category
             tmp_metadata["length"] = len(tmp_metadata["children"])
             tmp_metadata["buildTime"] = str(datetime.datetime.utcnow())
@@ -265,7 +259,7 @@ def writeMetadata(config, drive):
                             item["overview"],
                             item["popularity"],
                             item["voteAverage"],
-                        ) = (item["name"], "", "", "1900-01-01", "", 0.0, 0.0)
+                        ) = (item["name"], None, None, "1900-01-01", None, 0.0, 0.0)
 
             placeholder_metadata.append(tmp_metadata)
         elif category["type"] == "TV Shows":
@@ -277,7 +271,7 @@ def writeMetadata(config, drive):
             if root["mimeType"] == "application/vnd.google-apps.folder":
                 root["type"] = "directory"
                 root["children"] = []
-                for item in src.tree.iterDrive(root, drive):
+                for item in src.drivetools.driveIter(root, drive):
                     if root["mimeType"] == "application/vnd.google-apps.folder":
                         item["type"] = "directory"
                         root["children"].append(item)
@@ -318,7 +312,7 @@ def writeMetadata(config, drive):
                             item["overview"],
                             item["popularity"],
                             item["voteAverage"],
-                        ) = (item["name"], "", "", "1900-01-01", "", 0.0, 0.0)
+                        ) = (item["name"], None, None, "1900-01-01", None, 0.0, 0.0)
 
             placeholder_metadata.append(tmp_metadata)
         print("Done in %s" % (str(datetime.datetime.utcnow() - start_time)))
