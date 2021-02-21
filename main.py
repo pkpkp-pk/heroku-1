@@ -1,3 +1,4 @@
+import atexit
 import datetime
 import io
 import json
@@ -6,6 +7,7 @@ import random
 import sys
 import threading
 
+import apscheduler.schedulers.background
 import flask
 import flask_cors
 import googleapiclient
@@ -16,7 +18,12 @@ import src.config
 import src.credentials
 import src.metadata
 
-print("================      STARTING      ================")
+print(
+    "====================================================\n\033[96m               libDrive - \033[92mv1.1.5\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
+)
+
+
+print("\033[91mREADING CONFIG...\033[0m")
 if os.getenv("LIBDRIVE_CONFIG"):
     config_str = os.getenv("LIBDRIVE_CONFIG")
     with open("config.json", "w+") as w:
@@ -30,10 +37,10 @@ else:
         + "\033[0m"
     )
     sys.exit()
-
 config, drive = src.credentials.refreshCredentials(config)
+print("DONE.\n")
 
-print("================  READING METADATA  ================")
+print("\033[91mREADING METADATA...\033[0m")
 if os.getenv("DRIVE_METADATA"):
     params = {
         "supportsAllDrives": True,
@@ -65,23 +72,77 @@ if os.getenv("DRIVE_METADATA"):
             json.dump(metadata, w)
 else:
     metadata = src.metadata.readMetadata(config)
-
 global font_req
-font_req = requests.get("https://raw.githack.com/googlefonts/roboto/master/src/hinted/Roboto-Regular.ttf", "rb")
+font_req = requests.get(
+    "https://raw.githack.com/googlefonts/roboto/master/src/hinted/Roboto-Regular.ttf",
+    "rb",
+)
+print("DONE.\n")
+
+
+def threaded_metadata():
+    print("\033[91mWRITING METADATA...\033[0m")
+    for thread in threading.enumerate():
+        if thread.name == "metadata_thread":
+            print("DONE.\n")
+            return (
+                {
+                    "error": {
+                        "code": 500,
+                        "message": "libDrive is already building metadata, please wait.",
+                    }
+                },
+                500,
+            )
+    config = src.config.readConfig()
+    config, drive = src.credentials.refreshCredentials(config)
+    metadata_thread = threading.Thread(
+        target=src.metadata.writeMetadata,
+        args=(config, drive),
+        daemon=True,
+        name="metadata_thread",
+    )
+    print("\n")
+    metadata_thread.start()
+    return (
+        {
+            "success": {
+                "code": 200,
+                "message": "libDrive is building your new metadata",
+            }
+        },
+        200,
+    )
+
 
 def create_app():
     app = flask.Flask(__name__, static_folder="build")
+
+    if config["build_interval"] != 0:
+        print("\033[91mCREATING CRON JOB...\033[0m")
+        sched = apscheduler.schedulers.background.BackgroundScheduler(daemon=True)
+        sched.add_job(
+            threaded_metadata,
+            "interval",
+            minutes=config["build_interval"],
+        )
+        sched.start()
+        print("DONE.\n")
+
     config_categories = [d["id"] for d in config["category_list"]]
     metadata_categories = [d["id"] for d in metadata]
     if len(metadata) > 0 and sorted(config_categories) == sorted(metadata_categories):
-        if datetime.datetime.utcnow() <= datetime.datetime.strptime(
+        if config["build_interval"] == 0:
+            return app
+        elif datetime.datetime.utcnow() <= datetime.datetime.strptime(
             metadata[-1]["buildTime"], "%Y-%m-%d %H:%M:%S.%f"
         ) + datetime.timedelta(minutes=config["build_interval"]):
             return app
-    print("================  WRITING METADATA  ================")
-    buildThread = threading.Thread(
-        target=src.metadata.writeMetadata, args=(config, drive), daemon=True
-    ).start()
+        else:
+            threaded_metadata()
+    else:
+        threaded_metadata()
+
     return app
 
 
@@ -468,13 +529,17 @@ def imageAPI(image_type, text, extention):
             font = ImageFont.truetype(font_bytes, font_size)
             if jumpsize <= 1:
                 break
-        
+
         width, height = draw.textsize(text, font=font)
-        draw.text(((342-width)/2,(513-height)/2), text, fill="black", font=font)
+        draw.text(
+            ((342 - width) / 2, (513 - height) / 2), text, fill="black", font=font
+        )
         output = io.BytesIO()
         img.save(output, format=extention)
         output.seek(0, 0)
-        return flask.send_file(output, mimetype="image/%s" % (extention), as_attachment=False)
+        return flask.send_file(
+            output, mimetype="image/%s" % (extention), as_attachment=False
+        )
     elif image_type == "backdrop":
         img = Image.new("RGB", (1280, 720), color=(255, 255, 255))
         draw = ImageDraw.Draw(img)
@@ -495,86 +560,38 @@ def imageAPI(image_type, text, extention):
             font = ImageFont.truetype(font_bytes, font_size)
             if jumpsize <= 1:
                 break
-        
+
         width, height = draw.textsize(text, font=font)
-        draw.text(((1280-width)/2,(720-height)/2), text, fill="black", font=font)
+        draw.text(
+            ((1280 - width) / 2, (720 - height) / 2), text, fill="black", font=font
+        )
         output = io.BytesIO()
         img.save(output, format=extention)
         output.seek(0, 0)
-        return flask.send_file(output, mimetype="image/%s" % (extention), as_attachment=False)
+        return flask.send_file(
+            output, mimetype="image/%s" % (extention), as_attachment=False
+        )
+
 
 @app.route("/api/v1/rebuild")
 def rebuildAPI():
     config = src.config.readConfig()
-    force = flask.request.args.get("force")
-    if force == "true":
-        a = flask.request.args.get("a")
-        if any(a == account["auth"] for account in config["account_list"]):
-            rebuildThread = threading.Thread(
-                target=src.metadata.writeMetadata, args=(config, drive), daemon=True
-            ).start()
-            return (
-                flask.jsonify(
-                    {
-                        "success": {
-                            "code": 200,
-                            "message": "libDrive is building your new metadata",
-                        }
-                    }
-                ),
-                200,
-            )
-        else:
-            return (
-                flask.jsonify(
-                    {
-                        "error": {
-                            "code": 401,
-                            "message": "The secret key provided was incorrect.",
-                        }
-                    }
-                ),
-                401,
-            )
+    a = flask.request.args.get("a")
+    if any(a == account["auth"] for account in config["account_list"]):
+        res, code = threaded_metadata()
+        return flask.jsonify(res, code)
     else:
-        metadata = src.metadata.readMetadata(config)
-        build_time = datetime.datetime.strptime(
-            metadata[-1]["buildTime"], "%Y-%m-%d %H:%M:%S.%f"
+        return (
+            flask.jsonify(
+                {
+                    "error": {
+                        "code": 401,
+                        "message": "The secret key provided was incorrect.",
+                    }
+                }
+            ),
+            401,
         )
-        if datetime.datetime.utcnow() >= build_time + datetime.timedelta(
-            minutes=config["build_interval"]
-        ):
-            rebuildThread = threading.Thread(
-                target=src.metadata.writeMetadata, args=(config, drive), daemon=True
-            ).start()
-            return (
-                flask.jsonify(
-                    {
-                        "success": {
-                            "code": 200,
-                            "message": "libDrive is building your new metadata",
-                        }
-                    }
-                ),
-                200,
-            )
-        else:
-            return (
-                flask.jsonify(
-                    {
-                        "error": {
-                            "code": 425,
-                            "message": "The build interval restriction ends at %s UTC. Last build date was at %s UTC."
-                            % (
-                                build_time
-                                + datetime.timedelta(minutes=config["build_interval"]),
-                                build_time,
-                            ),
-                        }
-                    }
-                ),
-                425,
-            )
 
 
 @app.route("/api/v1/restart")
@@ -603,5 +620,6 @@ def pingAPI():
 
 
 if __name__ == "__main__":
-    print("================   SERVING SERVER   ================")
+    print("\033[91mSERVING SERVER...\033[0m")
+    print("DONE.\n")
     app.run(host="0.0.0.0", port=31145, threaded=True)
