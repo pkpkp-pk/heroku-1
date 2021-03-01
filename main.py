@@ -1,11 +1,12 @@
-import atexit
 import datetime
 import io
 import json
 import os
 import random
+import re
 import sys
 import threading
+import urllib
 
 import apscheduler.schedulers.background
 import colorama
@@ -21,7 +22,7 @@ import src.metadata
 
 colorama.init()
 print(
-    "====================================================\n\033[96m               libDrive - \033[92mv1.1.5\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
+    "====================================================\n\033[96m               libDrive - \033[92mv1.1.6\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
 )
 
 
@@ -83,7 +84,6 @@ print("DONE.\n")
 
 
 def threaded_metadata():
-    print("\n\033[91mWRITING METADATA...\033[0m")
     for thread in threading.enumerate():
         if thread.name == "metadata_thread":
             print("DONE.\n")
@@ -104,7 +104,6 @@ def threaded_metadata():
         daemon=True,
         name="metadata_thread",
     )
-    print("\n")
     metadata_thread.start()
     return (
         {
@@ -374,7 +373,6 @@ def downloadRedirectAPI(name):
     tmp_metadata = src.metadata.readMetadata(config)
     id = flask.request.args.get("id")
     ids = src.metadata.jsonExtract(obj=tmp_metadata, key="id", getObj=True)
-    name = ""
     for item in ids:
         if item["id"] == id:
             name = item["name"]
@@ -385,14 +383,11 @@ def downloadRedirectAPI(name):
     for i in range(len(keys)):
         args += "%s=%s&" % (keys[i], values[i])
     args = args[:-1]
-
-    if "cloudflare" in config:
-        if config["cloudflare"] != "":
-            return flask.redirect(
-                config["cloudflare"] + "/api/v1/download/%s%s" % (name, args)
-            )
-        else:
-            return flask.redirect("/api/v1/download/%s%s" % (name, args))
+    
+    if config.get("cloudflare") != ("" and None):
+        return flask.redirect(
+            config["cloudflare"] + "/api/v1/download/%s%s" % (name, args)
+        )
     else:
         return flask.redirect("/api/v1/download/%s%s" % (name, args))
 
@@ -415,11 +410,51 @@ def downloadAPI(name):
 
     a = flask.request.args.get("a")
     id = flask.request.args.get("id")
+    quality = flask.request.args.get("quality")
     if any(a == account["auth"] for account in config["account_list"]) and id:
         headers = {
             key: value for (key, value) in flask.request.headers if key != "Host"
         }
         headers["Authorization"] = "Bearer %s" % (config["access_token"])
+        if quality == "transcoded" and config.get("transcoded") == True:
+            req = requests.get(
+                "https://docs.google.com/get_video_info?authuser=&docid=%s&access_token=%s"
+                % (id, config["access_token"]),
+                headers={"Authorization": "Bearer %s" % config["access_token"]},
+            )
+            parsed = urllib.parse.parse_qs(urllib.request.unquote(req.text))
+            if parsed["status"] == ["ok"]:
+                if len(parsed["fmt_list"]) > 0:
+                    url = ""
+                    itag = re.search(r"^\d+[^\/]*", parsed["fmt_list"][0]).group(0)
+                    for stream in parsed["url"]:
+                        if ("itag=%s" % (itag)) in stream:
+                            url = stream
+                            break
+                    if url != "":
+                        resp = requests.request(
+                            method=flask.request.method,
+                            url=url,
+                            headers=headers,
+                            data=flask.request.get_data(),
+                            cookies=req.cookies,
+                            allow_redirects=True,
+                            stream=True,
+                        )
+                        excluded_headers = [
+                            "content-encoding",
+                            "content-length",
+                            "transfer-encoding",
+                            "connection",
+                        ]
+                        headers = [
+                            (name, value)
+                            for (name, value) in resp.raw.headers.items()
+                            if name.lower() not in excluded_headers
+                        ]
+                        return flask.Response(
+                            flask.stream_with_context(download_file(resp)), resp.status_code, headers
+                        )
         resp = requests.request(
             method=flask.request.method,
             url="https://www.googleapis.com/drive/v3/files/%s?alt=media" % (id),
@@ -509,8 +544,10 @@ def configAPI():
             )
 
 
-@app.route("/api/v1/image/<image_type>/<text>.<extention>")
-def imageAPI(image_type, text, extention):
+@app.route("/api/v1/image/<image_type>")
+def imageAPI(image_type):
+    text = flask.request.args.get("text")
+    extention = flask.request.args.get("extention")
     if image_type == "poster":
         img = Image.new("RGB", (342, 513), color=(255, 255, 255))
         draw = ImageDraw.Draw(img)
@@ -573,6 +610,16 @@ def imageAPI(image_type, text, extention):
         return flask.send_file(
             output, mimetype="image/%s" % (extention), as_attachment=False
         )
+    elif image_type == "thumbnail":
+        id = flask.request.args.get("id")
+        params = {
+            "fileId": id,
+            "fields": "thumbnailLink",
+            "supportsAllDrives": True,
+        }
+        res = drive.files().get(**params).execute()
+        thumbnail = re.sub(r"(s[^s]*)$", "s3840", res["thumbnailLink"])
+        return flask.redirect(thumbnail, code=302)
 
 
 @app.route("/api/v1/rebuild")
@@ -624,4 +671,4 @@ def pingAPI():
 if __name__ == "__main__":
     print("\033[91mSERVING SERVER...\033[0m")
     print("DONE.\n")
-    app.run(host="0.0.0.0", port=31145, threaded=True)
+    app.run(host="0.0.0.0", port=31145, threaded=True, debug=True)
