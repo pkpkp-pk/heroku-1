@@ -22,7 +22,7 @@ import src.metadata
 
 colorama.init()
 print(
-    "====================================================\n\033[96m               libDrive - \033[92mv1.1.6\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
+    "====================================================\n\033[96m               libDrive - \033[92mv1.1.7\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
 )
 
 
@@ -195,6 +195,20 @@ def environmentAPI():
     a = flask.request.args.get("a")  # AUTH
     if any(a == account["auth"] for account in config["account_list"]):
         account = next((i for i in config["account_list"] if i["auth"] == a), None)
+        if account.get("whitelist"):
+            category_list = []
+            for category in config["category_list"]:
+                if any(
+                    category["id"] == whitelist for whitelist in account["whitelist"]
+                ):
+                    category_list.append(category)
+                else:
+                    pass
+            tmp_environment = {
+                "account_list": account,
+                "category_list": category_list,
+            }
+            return flask.jsonify(tmp_environment)
         tmp_environment = {
             "account_list": account,
             "category_list": config["category_list"],
@@ -213,6 +227,13 @@ def metadataAPI():
     r = flask.request.args.get("r")  # RANGE
     id = flask.request.args.get("id")  # ID
     if any(a == account["auth"] for account in config["account_list"]):
+        account = next((i for i in config["account_list"] if i["auth"] == a), None)
+        if account.get("whitelist"):
+            tmp_metadata2 = []
+            for x in tmp_metadata:
+                if any(x["id"] == whitelist for whitelist in account["whitelist"]):
+                    tmp_metadata2.append(x)
+            tmp_metadata = tmp_metadata2
         if c:
             tmp_metadata = [
                 next((i for i in tmp_metadata if i["categoryInfo"]["name"] == c), None)
@@ -383,7 +404,7 @@ def downloadRedirectAPI(name):
     for i in range(len(keys)):
         args += "%s=%s&" % (keys[i], values[i])
     args = args[:-1]
-    
+
     if config.get("cloudflare") != ("" and None):
         return flask.redirect(
             config["cloudflare"] + "/api/v1/download/%s%s" % (name, args)
@@ -453,7 +474,9 @@ def downloadAPI(name):
                             if name.lower() not in excluded_headers
                         ]
                         return flask.Response(
-                            flask.stream_with_context(download_file(resp)), resp.status_code, headers
+                            flask.stream_with_context(download_file(resp)),
+                            resp.status_code,
+                            headers,
                         )
         resp = requests.request(
             method=flask.request.method,
@@ -671,4 +694,9 @@ def pingAPI():
 if __name__ == "__main__":
     print("\033[91mSERVING SERVER...\033[0m")
     print("DONE.\n")
-    app.run(host="0.0.0.0", port=31145, threaded=True, debug=False)
+    app.run(
+        host="0.0.0.0",
+        port=31145,
+        threaded=True,
+        debug=(os.getenv("LIBDRIVE_DEBUG").lower() == "true"),
+    )
