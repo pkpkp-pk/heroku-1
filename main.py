@@ -22,7 +22,7 @@ import src.metadata
 
 colorama.init()
 print(
-    "====================================================\n\033[96m               libDrive - \033[92mv1.1.7\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
+    "====================================================\n\033[96m               libDrive - \033[92mv1.1.8\033[94m\n                   @eliasbenb\033[0m\n====================================================\n"
 )
 
 
@@ -352,7 +352,9 @@ def metadataAPI():
                         tmp_metadata.get("title")
                         and tmp_metadata["type"] == "directory"
                     ):
-                        for item in src.drivetools.driveIter(tmp_metadata, drive):
+                        for item in src.drivetools.driveIter(
+                            tmp_metadata, drive, "video"
+                        ):
                             if item["mimeType"] == "application/vnd.google-apps.folder":
                                 item["type"] = "directory"
                                 tmp_metadata["children"].append(item)
@@ -366,7 +368,7 @@ def metadataAPI():
             if tmp_metadata["mimeType"] == "application/vnd.google-apps.folder":
                 tmp_metadata["type"] = "directory"
                 tmp_metadata["children"] = []
-                for item in src.drivetools.driveIter(tmp_metadata, drive):
+                for item in src.drivetools.driveIter(tmp_metadata, drive, "video"):
                     if tmp_metadata["mimeType"] == "application/vnd.google-apps.folder":
                         tmp_metadata["type"] = "directory"
                         tmp_metadata["children"].append(item)
@@ -641,8 +643,21 @@ def imageAPI(image_type):
             "supportsAllDrives": True,
         }
         res = drive.files().get(**params).execute()
-        thumbnail = re.sub(r"(s[^s]*)$", "s3840", res["thumbnailLink"])
-        return flask.redirect(thumbnail, code=302)
+        if res.get("thumbnailLink"):
+            thumbnail = re.sub(r"(s[^s]*)$", "s3840", res["thumbnailLink"])
+            return flask.redirect(thumbnail, code=302)
+        else:
+            return (
+                flask.jsonify(
+                    {
+                        "error": {
+                            "code": 500,
+                            "message": "The thumbnail does not exist on Google's servers.",
+                        }
+                    }
+                ),
+                500,
+            )
 
 
 @app.route("/api/v1/rebuild")
@@ -694,4 +709,9 @@ def pingAPI():
 if __name__ == "__main__":
     print("\033[91mSERVING SERVER...\033[0m")
     print("DONE.\n")
-    app.run(host="0.0.0.0", port=31145, threaded=True)
+    app.run(
+        host="0.0.0.0",
+        port=31145,
+        threaded=True,
+        debug=os.getenv("LIBDRIVE_DEBUG"),
+    )
